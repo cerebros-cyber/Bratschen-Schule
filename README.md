@@ -27,6 +27,10 @@ Lokal testen: `npx http-server .` und `http://localhost:8080` öffnen.
 - **Notenlesen fördern, nicht voraussetzen:** Zu jedem Ton gibt es den Notennamen und ein Griffbrett-Bild (welche Saite,
   welcher Finger). Bei neuen Tönen ist die Hilfe sofort da, bei bekannteren erst nach ein paar Sekunden, bei sicheren nur noch auf
   Wunsch (💡 Tipp). Dazu ein **Notenquiz** nur fürs Lesen.
+- **Tonleiter (aufnehmen & auswerten):** Tonleitern auf einer Saite von der leeren Saite bis zum 4. Finger (Dur oder Moll,
+  auf- und abwärts, wahlweise mit Metronom). Die App nimmt dein Spiel auf und zeigt danach für jeden Ton die Abweichung in Cent,
+  ob er erkannt wurde, wie gleichmäßig das Tempo und wie ruhig der Ton war, dazu konkrete Tipps („2. Finger etwas Richtung Steg“),
+  den Tonhöhenverlauf und – wo der Browser es kann – die Aufnahme zum Anhören. Die Ergebnisse jeder Tonleiter werden verglichen.
 - **Lieder:** „What Shall We Do with the Drunken Sailor“, „My Bonnie Lies over the Ocean“, „Row, Row, Row Your Boat“,
   „Michael, Row the Boat Ashore“ und kleine Übungsstücke. Anhören oder **mitspielen**: Die App wartet bei jedem Ton, bis er sitzt.
   Lieder werden freigeschaltet, sobald du ihre Töne gelernt hast.
@@ -39,11 +43,13 @@ Alles bleibt auf dem Gerät. Das Mikrofon wird nur zum Erkennen der Tonhöhe ben
 ## Tipps
 
 - Das Mikrofon funktioniert nur über **HTTPS** (GitHub Pages) – beim ersten Mal fragt iOS um Erlaubnis.
+- Oben rechts zeigt eine kleine Pegelanzeige, ob das Mikrofon dich hört (grün = Ton erkannt). Reagiert die App bei leisem Spiel
+  nicht, im Logbuch die **Mikrofon-Empfindlichkeit** erhöhen; in lauter Umgebung verringern.
 - Ruhige Umgebung hilft; das iPad/iPhone etwa einen halben bis einen Meter entfernt hinlegen.
 - Beim Wechsel in eine andere App schaltet sich das Mikrofon ab; danach einfach wieder „Mikrofon einschalten“ antippen.
 
 ## Technik
 
-Reines HTML/CSS/JavaScript ohne Build-Schritt. Tonhöhenerkennung mit dem YIN-Verfahren (`js/pitch.js`), Notensatz als SVG
+Reines HTML/CSS/JavaScript ohne Build-Schritt. Tonhöhenerkennung mit dem YIN-Verfahren (`js/pitch.js`), Tonleiter-Auswertung in `js/analysis.js`, Notensatz als SVG
 (`js/staff.js`), Lernpfad in `js/curriculum.js`, Anpassung des Schwierigkeitsgrads in `js/progress.js`, Lieder in `js/songs.js`.
 Nach Änderungen an Dateien `VERSION` in `sw.js` erhöhen.

@@ -56,7 +56,11 @@ export function rms(buf) {
   return Math.sqrt(s / buf.length);
 }
 
-// Mikrofon + laufende Analyse. onPitch erhält { freq|null, clarity, level } pro Bildschirmbild.
+// Empfindlichkeit → Mindestlautstärke (RMS). Darüber entscheidet zusätzlich die Klarheit des Tons,
+// Rauschen wird also auch bei niedriger Schwelle nicht als Ton erkannt.
+export const SENSITIVITY = { low: 0.004, normal: 0.0012, high: 0.0005, max: 0.0002 };
+
+// Mikrofon + laufende Analyse. onPitch erhält { freq|null, clarity, level, gate } pro Bildschirmbild.
 export class PitchListener {
   constructor(ctxProvider) {
     this.getCtx = ctxProvider;
@@ -64,11 +68,15 @@ export class PitchListener {
     this.running = false;
     this.handlers = new Set();
     this.muted = false;     // während die App selbst Töne spielt
-    this.gate = 0.008;      // Mindestlautstärke
+    this.baseGate = SENSITIVITY.normal;
+    this.noise = 0.0005;    // geschätztes Grundrauschen des Raums
     this.recent = [];
   }
 
   get active() { return !!this.stream; }
+  setSensitivity(key) { this.baseGate = SENSITIVITY[key] || SENSITIVITY.normal; }
+  // Schwelle passt sich dem Raum an: deutlich über dem Grundrauschen, aber nie über das Nötige hinaus
+  get gate() { return Math.max(this.baseGate, Math.min(this.noise * 2.5, this.baseGate * 4)); }
 
   async start() {
     if (this.stream) return;
@@ -81,7 +89,8 @@ export class PitchListener {
     if (ctx.state !== 'running') await ctx.resume();
     this.src = ctx.createMediaStreamSource(this.stream);
     this.analyser = ctx.createAnalyser();
-    this.analyser.fftSize = 4096;
+    // 2048 Abtastwerte ≈ 43 ms: reicht für die C-Saite und reagiert doppelt so schnell wie 4096
+    this.analyser.fftSize = 2048;
     this.buf = new Float32Array(this.analyser.fftSize);
     // stumm an den Ausgang hängen, damit Safari den Graphen sicher berechnet
     this.sink = ctx.createGain();
@@ -108,24 +117,22 @@ export class PitchListener {
     if (!this.running) return;
     this.analyser.getFloatTimeDomainData(this.buf);
     const level = rms(this.buf);
+    // Grundrauschen: fällt sofort auf leise Stellen, steigt nur langsam
+    this.noise = level < this.noise ? level : this.noise * 1.002;
+    const gate = this.gate;
     let res = null;
-    if (!this.muted && level > this.gate) res = yin(this.buf, this.sr);
+    if (!this.muted && level > gate) res = yin(this.buf, this.sr);
     let freq = null;
-    if (res && res.clarity > 0.75) {
+    if (res && res.clarity > 0.65) {
       this.recent.push(res.freq);
-      if (this.recent.length > 5) this.recent.shift();
-      // Median glättet einzelne Oktavsprünge
+      if (this.recent.length > 3) this.recent.shift();
+      // Median aus drei Messungen glättet einzelne Oktavsprünge, ohne zu verzögern
       const sorted = [...this.recent].sort((a, b) => a - b);
       freq = sorted[Math.floor(sorted.length / 2)];
-      // bei frischem Tonwechsel nicht auf alte Werte hören
-      if (Math.abs(1200 * Math.log2(res.freq / freq)) > 80 && this.recent.length >= 3) {
-        const close = this.recent.filter((f) => Math.abs(1200 * Math.log2(f / res.freq)) < 60);
-        if (close.length >= 2) freq = res.freq;
-      }
     } else {
       this.recent = [];
     }
-    const info = { freq, clarity: res?.clarity || 0, level };
+    const info = { freq, clarity: res?.clarity || 0, level, gate };
     this.handlers.forEach((fn) => fn(info));
     requestAnimationFrame(() => this.loop());
   }

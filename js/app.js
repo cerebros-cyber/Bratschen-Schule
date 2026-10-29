@@ -2,18 +2,21 @@
 
 import { parseNote, spellMidi, germanName, helmholtz, freqToMidi, midiToFreq } from './notes.js';
 import { PitchListener } from './pitch.js';
+import { analyse } from './analysis.js';
 import { staffSVG } from './staff.js';
-import { fingeringFor, fingerboardSVG, STRINGS } from './fingering.js';
+import { fingeringFor, fingeringOnString, fingerboardSVG, STRINGS } from './fingering.js';
 import { LEVELS, knownNotes, levelForNotes } from './curriculum.js';
 import { SONGS, parseSong } from './songs.js';
 import * as P from './progress.js';
-import { audio, voice, playMidi, playMelody, chime, fanfare } from './synth.js';
+import { audio, voice, playMidi, playMelody, chime, fanfare, click } from './synth.js';
 
 const app = document.getElementById('app');
 const mic = new PitchListener(audio);
 const S = P.state;
 let cleanup = null;
 let currentScreen = 'home';
+const MIC_SCREENS = ['tuner', 'exercise', 'free', 'song', 'scale'];
+mic.setSensitivity(S.settings.sens);
 
 // ---------- kleine Helfer ----------
 
@@ -58,7 +61,7 @@ function go(screen, arg) {
   window.scrollTo(0, 0);
   const fn = SCREENS[screen];
   cleanup = fn(arg) || null;
-  if (!['tuner', 'exercise', 'free', 'song'].includes(screen)) mic.stop();
+  if (!MIC_SCREENS.includes(screen)) mic.stop();
 }
 
 function topbar(title, sub = '') {
@@ -117,7 +120,7 @@ function compare(freq, targetMidi) {
 
 // Erkennt, ob der Zielton gehalten wird. hold = Millisekunden im Toleranzbereich.
 class Matcher {
-  constructor(targetMidi, tol, hold = 320) {
+  constructor(targetMidi, tol, hold = 200) {
     this.target = targetMidi; this.tol = tol; this.hold = hold;
     this.okSince = 0; this.lastSeen = 0; this.done = false;
   }
@@ -196,6 +199,7 @@ function home() {
     </section>
     <nav class="tiles">
       <button class="tile" data-go="tuner"><span class="ti">🎻</span><b>Stimmen</b><small>Saiten C · G · D · A</small></button>
+      <button class="tile" data-go="scale"><span class="ti">🪜</span><b>Tonleiter</b><small>aufnehmen & auswerten</small></button>
       <button class="tile" data-go="songs"><span class="ti">🏴‍☠️</span><b>Lieder</b><small>Shanties mitspielen</small></button>
       <button class="tile" data-go="quiz"><span class="ti">📜</span><b>Notenquiz</b><small>Bratschenschlüssel lesen</small></button>
       <button class="tile" data-go="free"><span class="ti">🧭</span><b>Freies Spiel</b><small>Intonation prüfen</small></button>
@@ -388,7 +392,7 @@ function exercise() {
     if (idx >= task.length) {
       advancing = true;
       render();
-      setTimeout(newTask, 650);
+      setTimeout(newTask, 400);
     } else startNote();
   };
 
@@ -657,6 +661,327 @@ function songScreen(id) {
   return () => { off(); stopAll(); };
 }
 
+// ---------- Tonleiter: aufnehmen und auswerten ----------
+
+const SCALE_STEPS = { dur: [0, 2, 4, 5, 7], moll: [0, 2, 3, 5, 7] };
+const LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+
+// Fünf Töne auf einer Saite: leer, 1., 2., 3. und 4. Finger – richtig benannt (Fis, B, Es …)
+function scaleNotes(stringName, mode) {
+  const str = STRINGS.find((s) => s.name === stringName);
+  const base = spellMidi(str.midi);
+  return SCALE_STEPS[mode].map((k, i) => {
+    const li = LETTERS.indexOf(base.step) + i;
+    const step = LETTERS[li % 7];
+    const oct = base.oct + Math.floor(li / 7);
+    const alt = str.midi + k - parseNote(`${step}${oct}`).midi;
+    return parseNote(`${step}${alt > 0 ? '#'.repeat(alt) : 'b'.repeat(-alt)}${oct}`);
+  });
+}
+
+const SCALE_TOL = { easy: 25, normal: 18, strict: 12 };
+
+function scaleAdvice(r, str) {
+  const tips = [];
+  // gleiche Töne (aufwärts und abwärts) zusammenfassen
+  const groups = new Map();
+  r.notes.filter((x) => x.status === 'low' || x.status === 'high').forEach((x) => {
+    if (!groups.has(x.note.id)) groups.set(x.note.id, []);
+    groups.get(x.note.id).push(x);
+  });
+  [...groups.values()]
+    .map((xs) => ({ note: xs[0].note, cents: xs.reduce((a, x) => a + x.cents, 0) / xs.length, all: xs.map((x) => Math.round(x.cents)) }))
+    .filter((g) => Math.abs(g.cents) > 5)
+    .sort((a, b) => Math.abs(b.cents) - Math.abs(a.cents))
+    .slice(0, 3)
+    .forEach((g) => {
+      const f = fingeringOnString(g.note, str);
+      const low = g.cents < 0;
+      const c = g.all.length > 1 ? `${g.all.map((v) => Math.abs(v)).join(' und ')} Cent` : `${Math.abs(g.all[0])} Cent`;
+      if (f.finger === 0) {
+        tips.push(`Die leere ${str}-Saite klang ${c} zu ${low ? 'tief' : 'hoch'} – Saite nachstimmen (Stimmgerät).`);
+      } else {
+        tips.push(`<b>${noteLabel(g.note)}</b> (${f.finger}. Finger) war ${c} zu ${low ? 'tief' : 'hoch'} – den Finger ein wenig ${low ? 'höher setzen, also Richtung Steg' : 'tiefer setzen, also Richtung Schnecke'}.`);
+      }
+    });
+  const missing = r.notes.filter((x) => x.status === 'missing');
+  if (missing.length) tips.push(`Nicht erkannt: ${missing.map((x) => noteLabel(x.note)).join(', ')}. Jeden Ton etwa eine halbe Sekunde ruhig halten.`);
+  const wrong = r.notes.filter((x) => x.status === 'wrong');
+  if (wrong.length) tips.push(`Falscher Ton statt ${wrong.map((x) => `${noteLabel(x.note)} (gespielt: ${noteLabel(spellMidi(x.played))})`).join(', ')} – auf das Griffbild unten achten.`);
+  if (r.evenness != null && r.evenness > 0.4) tips.push('Die Töne waren unterschiedlich lang. Mit dem Metronom gelingt ein gleichmäßiges Tempo leichter.');
+  if (r.wobble != null && r.wobble > 12) tips.push('Der Ton schwankte innerhalb der Noten. Bogen gleichmäßig ziehen und die Finger fest aufsetzen.');
+  if (!tips.length) tips.push('Sauber gespielt! Probiere als Nächstes eine andere Saite, Moll oder die strenge Intonation.');
+  return tips;
+}
+
+function drawScaleChart(canvas, frames, r, expected, cursor = null) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+  const g = canvas.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const mids = expected.map((n) => n.midi);
+  const lo = Math.min(...mids) - 1.5, hi = Math.max(...mids) + 1.5;
+  const T = Math.max(1, frames.at(-1)?.t || 1);
+  const L = 40;
+  const x = (t) => L + (t / T) * (w - L - 6);
+  const y = (m) => h - 8 - ((m - lo) / (hi - lo)) * (h - 16);
+  g.font = '13px "EB Garamond", serif';
+  [...new Set(expected.map((n) => n.id))].map((id) => expected.find((n) => n.id === id)).forEach((n) => {
+    g.strokeStyle = 'rgba(214,165,72,.35)';
+    g.beginPath(); g.moveTo(L, y(n.midi)); g.lineTo(w, y(n.midi)); g.stroke();
+    g.fillStyle = 'rgba(236,227,207,.75)';
+    g.fillText(noteLabel(n), 4, y(n.midi) + 4);
+  });
+  frames.forEach((f) => {
+    if (f.m == null || f.m < lo || f.m > hi) return;
+    const near = mids.reduce((a, b) => (Math.abs(b - f.m) < Math.abs(a - f.m) ? b : a));
+    const dev = Math.abs(f.m - near) * 100;
+    g.fillStyle = dev <= 15 ? 'rgba(143,191,106,.55)' : dev <= 30 ? 'rgba(214,165,72,.55)' : 'rgba(208,86,76,.5)';
+    g.fillRect(x(f.t) - 1, y(f.m) - 1, 2.2, 2.2);
+  });
+  r.notes.forEach((nr, i) => {
+    if (!nr.seg) return;
+    const col = nr.status === 'ok' ? '#8fbf6a' : nr.status === 'wrong' ? '#d0564c' : '#d6a548';
+    g.strokeStyle = col; g.lineWidth = 4; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(x(nr.seg.start), y(nr.seg.m)); g.lineTo(x(nr.seg.end), y(nr.seg.m)); g.stroke();
+    g.lineWidth = 1;
+    g.fillStyle = col;
+    g.fillText(String(i + 1), x((nr.seg.start + nr.seg.end) / 2) - 3, y(nr.seg.m) - 7);
+  });
+  if (cursor != null) {
+    g.strokeStyle = '#ece3cf';
+    g.beginPath(); g.moveTo(x(cursor), 0); g.lineTo(x(cursor), h); g.stroke();
+  }
+}
+
+function scaleScreen() {
+  const opt = { str: 'D', mode: 'dur', dir: 'updown', bpm: 0, ...(S.scaleOpt || {}) };
+  let expected = [];
+  let rec = null;          // laufende Aufnahme
+  let last = null;         // letzte Auswertung { frames, r, url }
+  let metro = null;
+  let lastDraw = 0;
+
+  app.innerHTML = `${topbar('Tonleiter', 'Bis zum 4. Finger – aufnehmen und auswerten')}
+    <div class="screen scale">
+      <div class="mic-box" hidden></div>
+      <div class="card scale-opts">
+        <div class="seg" data-o="str">${STRINGS.map((s) => `<button data-v="${s.name}" style="--c:${s.color}">${s.name}-Saite</button>`).join('')}</div>
+        <div class="seg" data-o="mode"><button data-v="dur">Dur</button><button data-v="moll">Moll</button></div>
+        <div class="seg" data-o="dir"><button data-v="updown">auf- und abwärts</button><button data-v="up">nur aufwärts</button></div>
+        <div class="seg" data-o="bpm"><button data-v="0">ohne Metronom</button><button data-v="60">♩ 60</button><button data-v="80">♩ 80</button><button data-v="100">♩ 100</button></div>
+      </div>
+      <div class="card staff-card scroll"><div class="staff-box"></div></div>
+      <div class="scale-fingers"></div>
+      <div class="rec-row">
+        <button class="btn primary big" data-a="rec">⏺ Aufnahme starten</button>
+        <div class="rec-info"></div>
+      </div>
+      <div class="rec-live" hidden><div class="feedback"><div class="verdict"></div>${meterHTML()}</div></div>
+      <div class="scale-result"></div>
+    </div>`;
+
+  const notesFor = () => {
+    const up = scaleNotes(opt.str, opt.mode);
+    return opt.dir === 'updown' ? [...up, ...up.slice(0, -1).reverse()] : up;
+  };
+
+  const renderStaff = (ptr = -1) => {
+    const items = expected.map((n, i) => ({
+      note: n, dur: 2,
+      cls: rec ? (i <= ptr ? 'done' : i === ptr + 1 ? 'current' : '') : last ? `res-${last.r.notes[i].status}` : '',
+      label: String(fingeringOnString(n, opt.str).finger),
+    }));
+    $('.staff-box').innerHTML = staffSVG(items, { endBar: true, scale: window.innerWidth < 600 ? 1.15 : 1.45 }).svg;
+  };
+
+  const renderSetup = () => {
+    S.scaleOpt = { ...opt };
+    P.save();
+    expected = notesFor();
+    app.querySelectorAll('.seg').forEach((sg) => sg.querySelectorAll('button').forEach((b) => b.classList.toggle('sel', String(opt[sg.dataset.o]) === b.dataset.v)));
+    const up = scaleNotes(opt.str, opt.mode);
+    $('.scale-fingers').innerHTML = up.map((n) => {
+      const f = fingeringOnString(n, opt.str);
+      return `<div class="sf">${fingerboardSVG(f)}<b>${noteLabel(n)}</b><small>${f.finger ? `${f.finger}. Finger` : 'leer'}</small></div>`;
+    }).join('');
+    renderStaff();
+  };
+
+  app.querySelector('.scale-opts').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-v]');
+    if (!b || rec) return;
+    const k = b.closest('.seg').dataset.o;
+    opt[k] = k === 'bpm' ? Number(b.dataset.v) : b.dataset.v;
+    last = null;
+    $('.scale-result').innerHTML = '';
+    renderSetup();
+  });
+
+  const stopMetro = () => { clearInterval(metro); metro = null; };
+
+  const startRec = async () => {
+    if (!(await ensureMic($('.mic-box')))) return;
+    audio();
+    last = null;
+    $('.scale-result').innerHTML = '';
+    const btn = $('[data-a="rec"]');
+    btn.disabled = true;
+    // Einzählen: mit Metronom vier Schläge, sonst „3, 2, 1“
+    const beats = opt.bpm ? 4 : 3;
+    const interval = opt.bpm ? 60000 / opt.bpm : 700;
+    for (let i = beats; i > 0; i--) {
+      if (currentScreen !== 'scale') return;
+      $('.rec-info').textContent = opt.bpm ? `Einzählen … ${beats - i + 1}` : `Gleich geht's los … ${i}`;
+      if (opt.bpm) click(i === beats);
+      await new Promise((res) => setTimeout(res, interval));
+    }
+    if (currentScreen !== 'scale') return;
+    if (opt.bpm) { let n = 0; click(true); metro = setInterval(() => click(++n % 4 === 0), interval); }
+    rec = { frames: [], t0: performance.now(), ptr: -1, cand: -1, candSince: 0, lastPitch: 0, doneAt: 0, chunks: [] };
+    try {
+      if (window.MediaRecorder) {
+        const chunks = rec.chunks;
+        rec.mr = new MediaRecorder(mic.stream);
+        rec.mr.ondataavailable = (ev) => { if (ev.data.size) chunks.push(ev.data); };
+        rec.mr.start();
+      }
+    } catch { rec.mr = null; }
+    btn.disabled = false;
+    btn.textContent = '■ Aufnahme beenden';
+    btn.classList.add('recording');
+    $('.rec-live').hidden = false;
+    $('.rec-info').textContent = 'Aufnahme läuft – spiel die Tonleiter.';
+    renderStaff(-1);
+  };
+
+  const stopRec = async () => {
+    if (!rec) return;
+    const r0 = rec;
+    rec = null;
+    stopMetro();
+    const btn = $('[data-a="rec"]');
+    btn.textContent = '⏺ Nochmal aufnehmen';
+    btn.classList.remove('recording');
+    $('.rec-live').hidden = true;
+    $('.rec-info').textContent = '';
+    let url = null;
+    if (r0.mr && r0.mr.state !== 'inactive') {
+      await new Promise((res) => { r0.mr.onstop = res; r0.mr.stop(); });
+      if (r0.chunks.length) url = URL.createObjectURL(new Blob(r0.chunks, { type: r0.mr.mimeType || 'audio/mp4' }));
+    }
+    const tol = SCALE_TOL[S.settings.strict] || 18;
+    const r = analyse(r0.frames, expected, tol);
+    if (last?.url) URL.revokeObjectURL(last.url);
+    last = { frames: r0.frames, r, url, tol };
+    // Verlauf je Tonleiter merken
+    const key = `${opt.str}-${opt.mode}-${opt.dir}`;
+    S.scaleLog ||= {};
+    const hist = (S.scaleLog[key] ||= []);
+    const prev = hist.at(-1);
+    if (r.found) {
+      hist.push({ d: new Date().toISOString().slice(0, 10), avg: Math.round(r.avgAbs), clean: r.clean, n: expected.length });
+      if (hist.length > 20) hist.shift();
+    }
+    P.save();
+    renderStaff();
+    showResult(prev, hist);
+  };
+
+  const showResult = (prev, hist) => {
+    const { r, url, tol } = last;
+    const str = opt.str;
+    const evenTxt = r.evenness == null ? '–' : r.evenness < 0.2 ? 'gleichmäßig' : r.evenness < 0.4 ? 'etwas ungleich' : 'ungleich';
+    const steadyTxt = r.wobble == null ? '–' : r.wobble < 6 ? 'sehr ruhig' : r.wobble < 12 ? 'ruhig' : 'wackelig';
+    const cmp = prev && r.found ? (Math.round(r.avgAbs) < prev.avg ? `besser als letztes Mal (${prev.avg} Cent)` : Math.round(r.avgAbs) > prev.avg ? `letztes Mal: ${prev.avg} Cent` : 'genau wie letztes Mal') : '';
+    $('.scale-result').innerHTML = `<section class="card">
+      <h2>Auswertung</h2>
+      ${r.found ? '' : '<p class="warn">Es wurden keine Töne der Tonleiter erkannt. Näher ans Mikrofon oder im Logbuch die Mikrofon-Empfindlichkeit erhöhen.</p>'}
+      <div class="stats">
+        <div><b>${r.found}/${expected.length}</b><small>Töne erkannt</small></div>
+        <div><b>${r.clean}</b><small>sauber (±${tol} Cent)</small></div>
+        <div><b>${r.avgAbs == null ? '–' : Math.round(r.avgAbs)}</b><small>Ø Abweichung in Cent${cmp ? `<br>${esc(cmp)}` : ''}</small></div>
+        <div><b class="txt">${evenTxt}</b><small>Tempo · Ton ${steadyTxt}</small></div>
+      </div>
+      <h3>Jeder Ton einzeln</h3>
+      <div class="note-bars">${r.notes.map((x, i) => {
+        const f = fingeringOnString(x.note, str);
+        const c = x.cents == null ? 0 : Math.max(-50, Math.min(50, x.cents));
+        const label = x.status === 'missing' ? 'fehlt' : x.status === 'wrong' ? noteLabel(spellMidi(x.played)) + '?' : `${x.cents > 0 ? '+' : ''}${Math.round(x.cents)}`;
+        return `<div class="nb ${x.status}"><span class="nb-val">${esc(label)}</span>
+          <div class="nb-track"><i style="${c >= 0 ? `bottom:50%;height:${c}%` : `top:50%;height:${-c}%`}"></i></div>
+          <b>${noteLabel(x.note)}</b><small>${i + 1} · ${f.finger || '0'}</small></div>`;
+      }).join('')}</div>
+      <p class="tiny">Balken nach oben = zu hoch, nach unten = zu tief (Skala ±50 Cent). Darunter: Position in der Tonleiter · Finger.</p>
+      <h3>Tipps</h3>
+      <ul class="advice">${scaleAdvice(r, str).map((t) => `<li>${t}</li>`).join('')}</ul>
+      <h3>Tonhöhenverlauf</h3>
+      <canvas class="scale-chart" height="240"></canvas>
+      <div class="actions">${url ? '<button class="btn" data-a="playback">▶ Aufnahme anhören</button>' : '<span class="tiny">Anhören der Aufnahme wird von diesem Browser nicht unterstützt.</span>'}</div>
+      ${hist.length > 1 ? `<p class="tiny">Verlauf dieser Tonleiter (Ø Cent): ${hist.slice(-8).map((h) => h.avg).join(' → ')}</p>` : ''}
+    </section>`;
+    const canvas = $('.scale-chart');
+    drawScaleChart(canvas, last.frames, r, expected);
+    if (url) {
+      const audioEl = new Audio(url);
+      let raf = 0;
+      const tick = () => {
+        drawScaleChart(canvas, last.frames, r, expected, audioEl.currentTime * 1000);
+        if (!audioEl.paused) raf = requestAnimationFrame(tick);
+      };
+      $('[data-a="playback"]').addEventListener('click', (e) => {
+        if (audioEl.paused) {
+          mic.muted = true;
+          audioEl.currentTime = 0;
+          audioEl.play();
+          e.target.textContent = '■ Anhalten';
+          tick();
+        } else audioEl.pause();
+      });
+      audioEl.addEventListener('pause', () => { cancelAnimationFrame(raf); mic.muted = false; $('[data-a="playback"]').textContent = '▶ Aufnahme anhören'; });
+      audioEl.addEventListener('ended', () => { cancelAnimationFrame(raf); mic.muted = false; drawScaleChart(canvas, last.frames, r, expected); });
+      last.audioEl = audioEl;
+    }
+  };
+
+  $('[data-a="rec"]').addEventListener('click', () => (rec ? stopRec() : startRec()));
+
+  const off = mic.on((info) => {
+    if (!rec) return;
+    const now = performance.now();
+    const t = now - rec.t0;
+    const m = info.freq ? freqToMidi(info.freq, S.settings.a4) : null;
+    rec.frames.push({ t, m });
+    // mitlesen: welcher Ton der Tonleiter ist gerade dran?
+    const next = expected[rec.ptr + 1];
+    if (m != null) {
+      rec.lastPitch = now;
+      if (next && Math.abs(m - next.midi) * 100 <= 60) {
+        if (rec.cand !== rec.ptr + 1) { rec.cand = rec.ptr + 1; rec.candSince = now; }
+        if (now - rec.candSince >= 150) { rec.ptr += 1; renderStaff(rec.ptr); if (rec.ptr === expected.length - 1) rec.doneAt = now; }
+      } else rec.cand = -1;
+    }
+    // von selbst beenden: nach dem letzten Ton kurz Stille oder lange gehalten, spätestens nach 90 s
+    if ((rec.doneAt && ((now - rec.lastPitch > 900) || now - rec.doneAt > 2500)) || t > 90000) { stopRec(); return; }
+    if (now - lastDraw < 40) return;
+    lastDraw = now;
+    const target = expected[Math.max(0, Math.min(expected.length - 1, rec.cand >= 0 ? rec.cand : rec.ptr))] || expected[0];
+    const c = compare(info.freq, target.midi);
+    const vEl = $('.verdict');
+    if (!c) { vEl.className = 'verdict'; vEl.innerHTML = `<span class="dim">${Math.round(t / 1000)} s · ${rec.ptr + 1} von ${expected.length} Tönen</span>`; setMeter($('.meter'), null, 18); return; }
+    const played = spellMidi(Math.round(c.midi));
+    const cents = (c.midi - Math.round(c.midi)) * 100;
+    vEl.className = `verdict ${Math.abs(cents) <= 18 ? 'ok' : cents < 0 ? 'low' : 'high'}`;
+    vEl.innerHTML = `${noteLabel(played)} <small>${cents > 0 ? '+' : ''}${Math.round(cents)} Cent · ${rec.ptr + 1} von ${expected.length} Tönen</small>`;
+    setMeter($('.meter'), cents, 18);
+  });
+
+  renderSetup();
+  return () => { off(); stopMetro(); if (rec) { rec.mr?.state === 'recording' && rec.mr.stop(); rec = null; } last?.audioEl?.pause(); if (last?.url) URL.revokeObjectURL(last.url); };
+}
+
 // ---------- Notenquiz ----------
 
 function quiz() {
@@ -746,6 +1071,8 @@ function logbook() {
           <select data-set="strict"><option value="easy" ${st.strict === 'easy' ? 'selected' : ''}>locker</option>
           <option value="normal" ${st.strict === 'normal' ? 'selected' : ''}>normal (passt sich der Stufe an)</option>
           <option value="strict" ${st.strict === 'strict' ? 'selected' : ''}>streng</option></select></label>
+        <label class="row">Mikrofon-Empfindlichkeit
+          <select data-set="sens">${[['low', 'niedrig – laute Umgebung'], ['normal', 'normal'], ['high', 'hoch – auch leises Spiel'], ['max', 'sehr hoch']].map(([v, t]) => `<option value="${v}" ${st.sens === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
         <label class="row">Klang bei Erfolg <input type="checkbox" data-set="sound" ${st.sound ? 'checked' : ''}></label>
         <label class="row">Stufe von Hand wählen
           <select data-set="level">${LEVELS.map((l, i) => `<option value="${i}" ${i === S.level ? 'selected' : ''}>${i + 1}. ${esc(l.title)}</option>`).join('')}</select></label>
@@ -770,6 +1097,7 @@ function logbook() {
     if (k === 'level') { S.level = Number(e.target.value); S.recent = []; toast(`Stufe ${S.level + 1} gewählt`); }
     else if (k === 'sound') st.sound = e.target.checked;
     else if (k === 'a4') st.a4 = Number(e.target.value);
+    else if (k === 'sens') { st.sens = e.target.value; mic.setSensitivity(st.sens); }
     else st[k] = e.target.value;
     P.save();
   });
@@ -804,15 +1132,34 @@ function logbook() {
   return () => stopPrev?.();
 }
 
-const SCREENS = { home, tuner, exercise, free: freePlay, songs, song: songScreen, quiz, log: logbook };
+const SCREENS = { home, tuner, exercise, free: freePlay, scale: scaleScreen, songs, song: songScreen, quiz, log: logbook };
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && mic.active) {
     mic.stop();
     // beim Zurückkommen muss das Mikrofon neu eingeschaltet werden
-    if (['tuner', 'exercise', 'free', 'song'].includes(currentScreen)) setTimeout(() => go(currentScreen === 'song' ? 'songs' : currentScreen), 0);
+    if (MIC_SCREENS.includes(currentScreen)) setTimeout(() => go(currentScreen === 'song' ? 'songs' : currentScreen), 0);
   }
 });
+
+// Kleine Pegelanzeige unten rechts: zeigt, ob das Mikrofon dich hört (grün = Ton erkannt)
+const levelEl = document.createElement('div');
+levelEl.className = 'mic-level';
+levelEl.hidden = true;
+levelEl.innerHTML = '<span>🎙</span><i><b></b><u></u></i>';
+document.body.appendChild(levelEl);
+const dbPos = (v) => Math.max(0, Math.min(1, (20 * Math.log10(Math.max(v, 1e-5)) + 80) / 70));
+let levelDraw = 0;
+mic.on((info) => {
+  const now = performance.now();
+  if (now - levelDraw < 60) return;
+  levelDraw = now;
+  levelEl.hidden = false;
+  levelEl.querySelector('b').style.width = `${dbPos(info.level) * 100}%`;
+  levelEl.querySelector('u').style.left = `${dbPos(info.gate) * 100}%`;
+  levelEl.className = `mic-level ${info.freq ? 'tone' : info.level > info.gate ? 'loud' : ''}`;
+});
+setInterval(() => { if (!mic.active) levelEl.hidden = true; }, 500);
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

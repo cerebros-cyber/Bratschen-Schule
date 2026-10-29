@@ -13,7 +13,7 @@ function fresh() {
     notes: {},              // id → { m: Spielsicherheit 0..1, q: Lesesicherheit 0..1, n, nq }
     recent: [],             // letzte Punktzahlen auf der aktuellen Stufe
     stats: { played: 0, correct: 0, seconds: 0, days: [] },
-    settings: { a4: 440, hints: 'auto', strict: 'normal', sound: true },
+    settings: { a4: 440, hints: 'auto', strict: 'normal', sound: true, sens: 'high' },
     custom: [],
   };
 }

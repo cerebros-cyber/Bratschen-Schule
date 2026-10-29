@@ -1,11 +1,12 @@
 // Service Worker: hält die App offline verfügbar.
 // Bei Änderungen an den Dateien VERSION erhöhen, damit Geräte die neue Fassung laden.
-const VERSION = 'bratsche-v1';
+const VERSION = 'bratsche-v2';
 const FILES = [
   './',
   'index.html',
   'manifest.webmanifest',
   'css/style.css',
+  'js/analysis.js',
   'js/app.js',
   'js/curriculum.js',
   'js/fingering.js',

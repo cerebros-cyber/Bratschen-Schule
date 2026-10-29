@@ -94,3 +94,8 @@ export function chime() {
 export function fanfare() {
   [587.33, 739.99, 880, 1174.66].forEach((f, i) => blip(f, i * 0.13, 0.5, 'triangle', 0.1));
 }
+
+// Metronom-Klick (betont = erster Schlag)
+export function click(accent = false) {
+  blip(accent ? 1760 : 1320, 0, 0.05, 'square', accent ? 0.06 : 0.04);
+}

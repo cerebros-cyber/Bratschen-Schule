@@ -68,7 +68,7 @@ code { background: rgba(255,255,255,.08); padding: 0 .3em; border-radius: 4px; f
 .btn.small { min-height: 34px; padding: .3em .9em; font-size: .9rem; }
 
 /* Kopfzeile */
-.top { display: flex; align-items: center; gap: 12px; padding: 10px 0 4px; }
+.top { display: flex; align-items: center; gap: 12px; padding: 10px 104px 4px 0; }
 .back { white-space: nowrap; background: none; border: 1px solid var(--line); color: var(--brass); font: 600 1rem var(--serif); border-radius: 999px; padding: .4em .9em; min-height: 40px; cursor: pointer; }
 .top-title h1 { font-size: 1.25rem; }
 .top-title .sub { font-size: .9rem; color: var(--muted); }
@@ -254,3 +254,51 @@ textarea.inp { font-family: ui-monospace, Menlo, monospace; font-size: .95rem; }
   .bn-name { font-size: 2.8rem; }
   .verdict { font-size: 1.25rem; }
 }
+
+/* Tonleiter */
+.scale-opts { display: flex; flex-direction: column; gap: 10px; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg button { font: 600 .95rem var(--serif); color: var(--text); background: #132a3c; border: 1px solid var(--line); border-radius: 999px; padding: .4em .9em; min-height: 40px; cursor: pointer; }
+.seg button[style] { border-bottom: 3px solid var(--c); }
+.seg button.sel { background: var(--brass); color: #22160a; border-color: #f0c672; }
+.scale-fingers { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 4px 0 8px; }
+.sf { display: flex; flex-direction: column; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; }
+.sf .fingerboard { width: 64px; }
+.sf b { font-family: var(--display); color: var(--brass); }
+.sf small { font-size: .8rem; }
+.rec-row { text-align: center; }
+.rec-row .btn.big { max-width: 420px; }
+.btn.recording { background: linear-gradient(#d0564c, #8f2e27); color: #fff; border-color: #f08a80; animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 8px rgba(208,86,76,.2); } }
+.rec-info { color: var(--muted); margin-top: 8px; min-height: 1.4em; }
+.staff .note.res-ok .head { fill: #3f8a2c; }
+.staff .note.res-low .head, .staff .note.res-high .head { fill: #b07a1c; }
+.staff .note.res-wrong .head, .staff .note.res-missing .head { fill: var(--bad); }
+.staff .note.res-ok .head.hollow { fill: #cfe8c4; stroke: #3f8a2c; }
+.staff .note.res-low .head.hollow, .staff .note.res-high .head.hollow { fill: #f3dfb3; stroke: #b07a1c; }
+.staff .note.res-wrong .head.hollow, .staff .note.res-missing .head.hollow { fill: #f2c9c4; stroke: var(--bad); }
+.note-bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(54px, 1fr)); gap: 6px; }
+.nb { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.nb-val { font-size: .85rem; min-height: 1.2em; }
+.nb-track { position: relative; width: 22px; height: 90px; background: rgba(255,255,255,.05); border-radius: 6px; margin: 2px 0 4px; }
+.nb-track::after { content: ''; position: absolute; left: -4px; right: -4px; top: 50%; height: 1px; background: var(--muted); }
+.nb-track i { position: absolute; left: 3px; right: 3px; background: var(--brass); border-radius: 3px; }
+.nb.ok .nb-track i { background: var(--ok); }
+.nb.ok .nb-val { color: var(--ok); }
+.nb.low .nb-val, .nb.high .nb-val { color: var(--brass); }
+.nb.wrong .nb-val, .nb.missing .nb-val { color: var(--bad); }
+.nb.wrong .nb-track, .nb.missing .nb-track { outline: 1px dashed var(--bad); }
+.nb b { font-family: var(--display); }
+.nb small { font-size: .75rem; }
+.advice { margin: 0; padding-left: 1.2em; }
+.advice li { margin: 4px 0; }
+.scale-chart { width: 100%; height: 240px; display: block; }
+.stats b.txt { font-size: 1.05rem; line-height: 1.9; }
+
+/* Mikrofon-Pegel */
+.mic-level { position: fixed; right: max(12px, env(safe-area-inset-right)); top: calc(var(--safe-t) + 18px); display: flex; align-items: center; gap: 6px; background: rgba(11,23,36,.9); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; z-index: 15; font-size: .9rem; }
+.mic-level i { position: relative; width: 54px; height: 8px; background: rgba(255,255,255,.08); border-radius: 4px; overflow: hidden; }
+.mic-level b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--muted); transition: width .06s; }
+.mic-level u { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); }
+.mic-level.loud b { background: var(--brass); }
+.mic-level.tone b { background: var(--ok); }

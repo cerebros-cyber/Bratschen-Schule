@@ -66,3 +66,12 @@ export function fingerboardSVG(fing) {
   }
   return svg + '</svg>';
 }
+
+// Griff auf einer bestimmten Saite (für Tonleitern, in denen der 4. Finger statt der leeren Nachbarsaite gespielt wird)
+export function fingeringOnString(note, stringName) {
+  const string = STRINGS.find((s) => s.name === stringName);
+  if (!string || !(note.midi - string.midi in FINGERS)) return fingeringFor(note);
+  const semis = note.midi - string.midi;
+  const f = FINGERS[semis];
+  return { string, semis, ...f, label: `${string.name}-Saite · ${f.text}`, name: germanName(note) };
+}
